@@ -6,12 +6,13 @@ import matplotlib.patches as patches
 import time
 from scipy.integrate import ode
 
-
+dopri_counts = 0
+# Controller is generic param but can name this like a class passed in
 def sim_run(options, PidController):
-    start = time.clock()
+    start = time.perf_counter()
     # Simulator Options
     FIG_SIZE = options['FIG_SIZE'] # [Width, Height]
-    PID_DEBUG = options['PID_DEBUG']
+    PID_DEBUG = options['PID_DEBUG'] # this is not working for some reason
 
     # Physics Options
     GRAVITY = options['GRAVITY']
@@ -26,61 +27,65 @@ def sim_run(options, PidController):
     SET_POINT = options['SET_POINT']
     OUTPUT_GAIN = options['OUTPUT_GAIN']
 
-    Pid = PidController(SET_POINT)
-
-
+    pid = PidController(SET_POINT)
+    
     # ODE Solver
-    def elevator_physics(t, state):
-        # State vector.
-        x = state[0]
-        x_dot = state[1]
-
+    def elevator_physics(time_step, state):
+        global dopri_counts
+        dopri_counts += 1
+        position = state[0]
+        velocity = state[1]
+        
         # Acceleration of gravity.
         g = -9.8
-        x_dot_dot = 0
+        acceleration = 0
 
         if CONTROLLER:
-            x_dot_dot += Pid.run(x,t) * OUTPUT_GAIN / (E_MASS + CW_MASS + P_MASS)
+            # calulcate the acceleration and grow/shrink the acceleration value based on PID output
+            # initial 3
+            acceleration += pid.run(position,time_step) * OUTPUT_GAIN / (E_MASS + CW_MASS + P_MASS)
         if GRAVITY:
-            x_dot_dot += g*(E_MASS + P_MASS - CW_MASS) / (E_MASS + P_MASS + CW_MASS)
+            # 3 * (-9.8 * )
+            acceleration += g*(E_MASS + P_MASS - CW_MASS) / (E_MASS + P_MASS + CW_MASS)
         if FRICTION:
-            x_dot_dot -= x_dot * 0.2
+            acceleration -= velocity * 0.2
 
         #print(t, x_dot, x_dot_dot)
         # Output state derivatives.
-        return [x_dot, x_dot_dot]
-
-
-
+        return [velocity, acceleration]
 
     # ODE Info.
-    solver = ode(elevator_physics)
-    solver.set_integrator('dopri5')
+    solver = ode(f=elevator_physics)
+    solver.set_integrator('dopri5') # Dormand-Prince 5th-order Runge-Kutta method
 
     # Set initial values.
     t0 = 0.0
     t_end = 30.2
     dt = 0.05
-    t = np.arange(t0, t_end, dt)
+    
+    # you store sol[k]
+    t = np.arange(t0, t_end, dt) # array all time values, 20hz [0.0]
 
 
     # Solution array and initial states.
-    sol = np.zeros((int(t_end/dt), 3))
-    state_initial = [START_LOC, 0.0]
+    sol = np.zeros((int(t_end/dt), 3)) # 604 x 3 array [position, velocity, acceleration]
+    state_initial = [START_LOC, 0.0] # position, velocity
     solver.set_initial_value(state_initial, t0)
-    sol[0] = [state_initial[0], state_initial[1], 0.0]
+    sol[0] = [state_initial[0], state_initial[1], 0.0] # position 0, velocity 0.0, acceleration 0.0
     prev_vel = state_initial[1]
 
     # Repeatedly call the `integrate` method to advance the
     # solution to time t[k], and save the solution in sol[k].
     k = 1
-    while solver.successful() and solver.t < t_end-dt:
-        solver.integrate(t[k])
-        sol[k] = [solver.y[0], solver.y[1], (solver.y[1]-prev_vel)/dt]
+    while solver.successful() and solver.t < (t_end - dt):
+        # dopri5.run
+        solver.integrate(t[k]) # integrate for the current time step, stored in solver.y, _y is float, y is object/property
+        sol[k] = [solver.y[0], solver.y[1], (solver.y[1]-prev_vel)/dt] # store the result, new accel = rate of change from previous /div
         #print(sol[k])
         k += 1
         prev_vel = solver.y[1]
-
+        
+    print("Dopri5 Run Count: ", dopri_counts)
     state = sol
 
 
@@ -198,7 +203,7 @@ def sim_run(options, PidController):
 
     if PID_DEBUG:
         debug_width = 4
-        data = Pid.output_data
+        data = pid.output_data
         #print(len(data[:,0]))
         # P
         ax = fig.add_subplot(gs[0:4, debug_width:strip_width])
@@ -226,9 +231,10 @@ def sim_run(options, PidController):
         plt.xlabel('Time (s)')
         plt.xlim(0, 30)
 
-    print("Compute Time: ", round(time.clock() - start, 3), "seconds.")
-    # Animation.
-    elevator_ani = animation.FuncAnimation(fig, update_plot, frames=range(0,int(30.0*20)), interval=50, repeat = False, blit=True)
+    print("Compute Time: ", round(time.perf_counter() - start, 3), "seconds.")
+    # keep the animation object alive in memory
+    _ = animation.FuncAnimation(fig, update_plot, frames=range(0,int(30.0*20)), interval=50, repeat = False, blit=True)
     #line_ani.save('lines.mp4')
 
+    # start the matplotlib
     plt.show()

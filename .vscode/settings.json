@@ -1,0 +1,4 @@
+{
+    "python.defaultInterpreterPath": "/opt/homebrew/anaconda3/envs/PID/bin/python",
+    "python.terminal.activateEnvironment": true,
+}
