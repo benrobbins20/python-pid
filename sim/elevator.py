@@ -27,7 +27,6 @@ writer.register(
         "output": "number",
         "p_out": "number",
         "d_out": "number",
-        "raw_accel": "number"
     }
 )
 atexit.register(writer.close)
@@ -77,7 +76,8 @@ def sim_run(options, PidController):
         x,v = state
         # velocity not needed here as integrate calls this a bunch of times for Rutta Bega thing
         v,a,_,_,_ = calc_dynamics(t=time_step,state=state)
-         
+        
+        
         return [v, a]
 
     # ODE Info.
@@ -87,7 +87,7 @@ def sim_run(options, PidController):
     # Set initial values.
     t0 = 0.0
     t_end = 30.2
-    dt = 0.05
+    dt = 0.01
     
     # you store sol[k]
     t = np.arange(t0, t_end, dt) # array all time values, 20hz [0.0]
@@ -106,30 +106,31 @@ def sim_run(options, PidController):
     while solver.successful() and solver.t < (t_end - dt):
         # dopri5.run
         solver.integrate(t[k]) # integrate for the current time step, stored in solver.y, _y is float, y is object/property
-        p = solver.y[0]
+        x = solver.y[0]
         v = solver.y[1]
+        
         # if solver is successful, collect the output, ignore velocity
-        _,a,output,p_out,d_out = calc_dynamics(t=t[k],state=[p,v])
-        sol[k] = [p, v, a] # store the result, new accel = rate of change from previous /div
+        _,a,o,p_out,d_out = calc_dynamics(t=t[k],state=[x,v])
+      
+        sol[k] = [x, v, a] # store the result, new accel = rate of change from previous /div
         writer.write(
-            topic="/elevator",
-            time=t[k],
-            data={
-                "time": t[k],
-                "position": p,
-                "position_err": SET_POINT - p,
-                "desired_velo": (SET_POINT - p) / (SET_POINT - START_LOC),
-                "actual_velo": v,
-                "velocity_err": ((SET_POINT - p) / (SET_POINT - START_LOC)) - v,
-                "acceleration": a,
-                "output": output,
-                "p_out": pid.p_out,
-                "d_out": pid.d_out,
-                "raw_accel": pid.raw_accel
-            }
-        )
+                topic="/elevator",
+                time=t[k],
+                data={
+                    "time": t[k],
+                    "position": x,
+                    "position_err": SET_POINT - x,
+                    "desired_velo": (SET_POINT - x) / (SET_POINT - START_LOC),
+                    "actual_velo": v,
+                    "velocity_err": ((SET_POINT - x) / (SET_POINT - START_LOC)) - v,
+                    "acceleration": a,
+                    "output": o,
+                    "p_out": p_out,
+                    "d_out": d_out,
+                }
+            )
         k += 1
-        prev_vel = solver.y[1]
+        prev_vel = v
         
     print("Dopri5 Run Count: ", dopri_counts)
     state = sol
@@ -141,9 +142,10 @@ def sim_run(options, PidController):
 
     def update_plot(num):
         #print(state[num])
+        current_time = t[num]
 
         # Time bar.
-        time_bar.set_data([7.8, 7.8], [0, num/20])
+        time_bar.set_data([7.8, 7.8], [0, current_time])
 
         # Elevator.
         el_l.set_data([3, 3],[state[num,0], state[num,0]+3])
@@ -152,7 +154,8 @@ def sim_run(options, PidController):
         el_b.set_data([3, 6],[state[num,0], state[num,0]])
 
         # Timer.
-        time_text.set_text(str(round(num/20+0.04,1)))
+        # time_text.set_text(str(round(num/20+0.04,1)))
+        time_text.set_text(str(round(current_time, 1)))
 
         # Strip Chart.
         pos.set_data(t[0:num], state[0:num,0])
@@ -279,7 +282,7 @@ def sim_run(options, PidController):
 
     print("Compute Time: ", round(time.perf_counter() - start, 3), "seconds.")
     # keep the animation object alive in memory
-    _ = animation.FuncAnimation(fig, update_plot, frames=range(0,int(30.0*20)), interval=50, repeat = False, blit=True)
+    _ = animation.FuncAnimation(fig, update_plot, frames=range(len(t)), interval=dt*1000, repeat = False, blit=True)
     #line_ani.save('lines.mp4')
 
     # start the matplotlib
