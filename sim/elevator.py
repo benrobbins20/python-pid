@@ -1,3 +1,5 @@
+import atexit
+
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
@@ -6,7 +8,30 @@ import matplotlib.patches as patches
 import time
 from scipy.integrate import ode
 
+from mcap_writer import McapWriter
+
 dopri_counts = 0
+timestamp = time.time()
+file = f"{timestamp}.mcap"
+writer = McapWriter(path=file)
+writer.register(
+    topic="/elevator",
+    fields={
+        "time": "number",
+        "position": "number",
+        "position_err": "number",
+        "desired_velo": "number",
+        "actual_velo": "number",
+        "velocity_err": "number",
+        "acceleration": "number",
+        "output": "number",
+        "p_out": "number",
+        "d_out": "number",
+        "raw_accel": "number"
+    }
+)
+atexit.register(writer.close)
+
 # Controller is generic param but can name this like a class passed in
 def sim_run(options, PidController):
     start = time.perf_counter()
@@ -26,33 +51,34 @@ def sim_run(options, PidController):
     START_LOC = options['START_LOC']
     SET_POINT = options['SET_POINT']
     OUTPUT_GAIN = options['OUTPUT_GAIN']
+    TOTAL_MASS = E_MASS + CW_MASS + P_MASS
+    PAYLOAD_MASS = E_MASS + P_MASS - CW_MASS
+    
 
     pid = PidController(SET_POINT)
+    
+    def calc_dynamics(t, state):
+        x,v = state 
+        output, p_out, d_out = pid.run(t=t,x=x,v=v)
+        a = output*OUTPUT_GAIN / TOTAL_MASS
+        g = -9.8
+        if GRAVITY:
+            a += (g * PAYLOAD_MASS) / TOTAL_MASS
+        if FRICTION:
+            a -= 0.2 * v
+        
+        return v, a, output, p_out, d_out
     
     # ODE Solver
     def elevator_physics(time_step, state):
         global dopri_counts
         dopri_counts += 1
-        position = state[0]
-        velocity = state[1]
-        
-        # Acceleration of gravity.
-        g = -9.8
-        acceleration = 0
-
-        if CONTROLLER:
-            # calulcate the acceleration and grow/shrink the acceleration value based on PID output
-            # initial 3
-            acceleration += pid.run(position,time_step) * OUTPUT_GAIN / (E_MASS + CW_MASS + P_MASS)
-        if GRAVITY:
-            # 3 * (-9.8 * )
-            acceleration += g*(E_MASS + P_MASS - CW_MASS) / (E_MASS + P_MASS + CW_MASS)
-        if FRICTION:
-            acceleration -= velocity * 0.2
-
-        #print(t, x_dot, x_dot_dot)
-        # Output state derivatives.
-        return [velocity, acceleration]
+        # get last state from the state callback
+        x,v = state
+        # velocity not needed here as integrate calls this a bunch of times for Rutta Bega thing
+        v,a,_,_,_ = calc_dynamics(t=time_step,state=state)
+         
+        return [v, a]
 
     # ODE Info.
     solver = ode(f=elevator_physics)
@@ -80,8 +106,28 @@ def sim_run(options, PidController):
     while solver.successful() and solver.t < (t_end - dt):
         # dopri5.run
         solver.integrate(t[k]) # integrate for the current time step, stored in solver.y, _y is float, y is object/property
-        sol[k] = [solver.y[0], solver.y[1], (solver.y[1]-prev_vel)/dt] # store the result, new accel = rate of change from previous /div
-        #print(sol[k])
+        p = solver.y[0]
+        v = solver.y[1]
+        # if solver is successful, collect the output, ignore velocity
+        _,a,output,p_out,d_out = calc_dynamics(t=t[k],state=[p,v])
+        sol[k] = [p, v, a] # store the result, new accel = rate of change from previous /div
+        writer.write(
+            topic="/elevator",
+            time=t[k],
+            data={
+                "time": t[k],
+                "position": p,
+                "position_err": SET_POINT - p,
+                "desired_velo": (SET_POINT - p) / (SET_POINT - START_LOC),
+                "actual_velo": v,
+                "velocity_err": ((SET_POINT - p) / (SET_POINT - START_LOC)) - v,
+                "acceleration": a,
+                "output": output,
+                "p_out": pid.p_out,
+                "d_out": pid.d_out,
+                "raw_accel": pid.raw_accel
+            }
+        )
         k += 1
         prev_vel = solver.y[1]
         
