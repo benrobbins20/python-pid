@@ -11,7 +11,7 @@ options['FIG_SIZE'] = [8, 8] # [Width, Height]
 options['PID_DEBUG'] = False
 # Physics Options
 options['GRAVITY'] = True
-options['FRICTION'] = True
+options['FRICTION'] = False
 options['ELEVATOR_MASS'] = 1000
 options['COUNTERWEIGHT_MASS'] = 1000
 options['PEOPLE_MASS'] = 0
@@ -34,19 +34,20 @@ class Controller:
         self.d_out = 0
         
         self.raw_accel = 0
+        self.kp = 1.6
+        self.kd = 3.4
+        self.max_output = 5.0
         
         
         self.start_error = options['SET_POINT'] - options['START_LOC']
         
     def run(self, t, x, v):
         position_error = self.r - x
-        kp = 2
-        kd = 3.2
-        max_power = 5.0
-        self.p_out = kp * position_error
-        self.d_out = -kd * v
+        self.p_out = self.kp * position_error
+        self.d_out = -self.kd * v
         raw_output = self.p_out + self.d_out
-        self.output = max_power * np.tanh(raw_output / max_power)
+        self.output = self.max_output * np.tanh(raw_output / self.max_output)
+        
         return self.output, self.p_out, self.d_out
 
 sim_run(options, Controller)

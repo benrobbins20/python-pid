@@ -77,7 +77,6 @@ def sim_run(options, PidController):
         # velocity not needed here as integrate calls this a bunch of times for Rutta Bega thing
         v,a,_,_,_ = calc_dynamics(t=time_step,state=state)
         
-        
         return [v, a]
 
     # ODE Info.
@@ -87,14 +86,13 @@ def sim_run(options, PidController):
     # Set initial values.
     t0 = 0.0
     t_end = 30.2
-    dt = 0.01
+    dt = 0.01 #10ms/100Hz/
     
     # you store sol[k]
-    t = np.arange(t0, t_end, dt) # array all time values, 20hz [0.0]
-
+    t = np.arange(t0, t_end, dt) # array all time values, 100Hz
 
     # Solution array and initial states.
-    sol = np.zeros((int(t_end/dt), 3)) # 604 x 3 array [position, velocity, acceleration]
+    sol = np.zeros((int(t_end/dt), 3)) #  x 3 array [position, velocity, acceleration]
     state_initial = [START_LOC, 0.0] # position, velocity
     solver.set_initial_value(state_initial, t0)
     sol[0] = [state_initial[0], state_initial[1], 0.0] # position 0, velocity 0.0, acceleration 0.0
