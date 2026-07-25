@@ -25,7 +25,9 @@ writer.register(
         "velocity_err": "number",
         "acceleration": "number",
         "output": "number",
+        "raw_output": "number",
         "p_out": "number",
+        "i_out": "number",
         "d_out": "number",
     }
 )
@@ -58,7 +60,7 @@ def sim_run(options, PidController):
     
     def calc_dynamics(t, state):
         x,v = state 
-        output, p_out, d_out = pid.run(t=t,x=x,v=v)
+        output, raw_output, p_out, i_out, d_out = pid.run(t=t,x=x,v=v)
         a = output*OUTPUT_GAIN / TOTAL_MASS
         g = -9.8
         if GRAVITY:
@@ -66,7 +68,7 @@ def sim_run(options, PidController):
         if FRICTION:
             a -= 0.2 * v
         
-        return v, a, output, p_out, d_out
+        return v, a, output, raw_output, p_out, i_out, d_out
     
     # ODE Solver
     def elevator_physics(time_step, state):
@@ -75,7 +77,7 @@ def sim_run(options, PidController):
         # get last state from the state callback
         x,v = state
         # velocity not needed here as integrate calls this a bunch of times for Rutta Bega thing
-        v,a,_,_,_ = calc_dynamics(t=time_step,state=state)
+        v,a,_,_,_,_,_ = calc_dynamics(t=time_step,state=state)
         
         return [v, a]
 
@@ -86,7 +88,7 @@ def sim_run(options, PidController):
     # Set initial values.
     t0 = 0.0
     t_end = 30.2
-    dt = 0.01 #10ms/100Hz/
+    dt = 0.01 # 10ms/100Hz
     
     # you store sol[k]
     t = np.arange(t0, t_end, dt) # array all time values, 100Hz
@@ -108,7 +110,7 @@ def sim_run(options, PidController):
         v = solver.y[1]
         
         # if solver is successful, collect the output, ignore velocity
-        _,a,o,p_out,d_out = calc_dynamics(t=t[k],state=[x,v])
+        _,a,o,ro,p_out,i_out,d_out = calc_dynamics(t=t[k],state=[x,v])
       
         sol[k] = [x, v, a] # store the result, new accel = rate of change from previous /div
         writer.write(
@@ -123,7 +125,9 @@ def sim_run(options, PidController):
                     "velocity_err": ((SET_POINT - x) / (SET_POINT - START_LOC)) - v,
                     "acceleration": a,
                     "output": o,
+                    "raw_output": ro,
                     "p_out": p_out,
+                    "i_out": i_out,
                     "d_out": d_out,
                 }
             )
