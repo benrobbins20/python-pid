@@ -58,9 +58,9 @@ def sim_run(options, PidController):
 
     pid = PidController(SET_POINT)
     
-    def calc_dynamics(t, state):
+    def calc_dynamics(t, state, dt=None):
         x,v = state 
-        output, raw_output, p_out, i_out, d_out = pid.run(t=t,x=x,v=v)
+        output, raw_output, p_out, i_out, d_out = pid.run(t=t,x=x,v=v,dt=dt)
         a = output*OUTPUT_GAIN / TOTAL_MASS
         g = -9.8
         if GRAVITY:
@@ -74,9 +74,9 @@ def sim_run(options, PidController):
     def elevator_physics(time_step, state):
         global dopri_counts
         dopri_counts += 1
-        # get last state from the state callback
-        x,v = state
+        
         # velocity not needed here as integrate calls this a bunch of times for Rutta Bega thing
+        # these are mostly the multiple dopri calls per time step, v,a
         v,a,_,_,_,_,_ = calc_dynamics(t=time_step,state=state)
         
         return [v, a]
@@ -94,11 +94,10 @@ def sim_run(options, PidController):
     t = np.arange(t0, t_end, dt) # array all time values, 100Hz
 
     # Solution array and initial states.
-    sol = np.zeros((int(t_end/dt), 3)) #  x 3 array [position, velocity, acceleration]
+    solution = np.zeros((int(t_end/dt), 3)) #  x 3 array [position, velocity, acceleration]
     state_initial = [START_LOC, 0.0] # position, velocity
     solver.set_initial_value(state_initial, t0)
-    sol[0] = [state_initial[0], state_initial[1], 0.0] # position 0, velocity 0.0, acceleration 0.0
-    prev_vel = state_initial[1]
+    solution[0] = [state_initial[0], state_initial[1], 0.0] # position 0, velocity 0.0, acceleration 0.0
 
     # Repeatedly call the `integrate` method to advance the
     # solution to time t[k], and save the solution in sol[k].
@@ -109,10 +108,14 @@ def sim_run(options, PidController):
         x = solver.y[0]
         v = solver.y[1]
         
-        # if solver is successful, collect the output, ignore velocity
-        _,a,o,ro,p_out,i_out,d_out = calc_dynamics(t=t[k],state=[x,v])
+        # once it successfully integrates, capture dt and manually call calc_dynamics to update controller integral
+        dt = t[k] - t[k-1]
+        
+        # if solver is successful, collect the output, use pos,velo from the solver.y[]
+        _,a,o,ro,p_out,i_out,d_out = calc_dynamics(t=t[k],state=[x,v], dt=dt)
       
-        sol[k] = [x, v, a] # store the result, new accel = rate of change from previous /div
+        # store the result, new accel = rate of change from previous /div
+        solution[k] = [x, v, a] 
         writer.write(
                 topic="/elevator",
                 time=t[k],
@@ -132,10 +135,9 @@ def sim_run(options, PidController):
                 }
             )
         k += 1
-        prev_vel = v
         
     print("Dopri5 Run Count: ", dopri_counts)
-    state = sol
+    state = solution
 
 
     ###################
