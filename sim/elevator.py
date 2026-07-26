@@ -57,9 +57,10 @@ def sim_run(options, PidController):
     START_LOC = options['START_LOC']
     SET_POINT = options['SET_POINT']
     OUTPUT_GAIN = options['OUTPUT_GAIN']
+    MAX_ACCEL = options['MAX_ACCEL']
     TOTAL_MASS = E_MASS + CW_MASS + P_MASS
     PAYLOAD_MASS = E_MASS + P_MASS - CW_MASS
-    g = -9.8
+    g = 9.8
     
 
     pid = PidController(SET_POINT)
@@ -67,17 +68,16 @@ def sim_run(options, PidController):
     def calc_dynamics(t, state, dt=None):
         x,v = state
         
-        # solver will call this a bunch 
+        # solver will call this a bunch with dt=None, only call calc_dynamics after solver.integrate()
         output, raw_output, p_out, i_out, d_out = pid.run(t=t,x=x,v=v,dt=dt)
-        # full equation
-        motor_output = output * OUTPUT_GAIN # max 5000 output
-        payload_accel = g * PAYLOAD_MASS # apply gravity to the payload mass, this is the force of gravity on the payload
-        a = (motor_output + payload_accel) / TOTAL_MASS # a = F/m, this is the acceleration of the elevator, counterweight, and payload
         
-        # short hand because terms cancel
-        # a = output*OUTPUT_GAIN / TOTAL_MASS
+        motor_force = output * OUTPUT_GAIN 
+        
+        gravity_force = 0
         if GRAVITY:
-            a += (g * PAYLOAD_MASS) / TOTAL_MASS
+            gravity_force = -g * PAYLOAD_MASS
+                
+        friction_force = 0        
         if FRICTION:
             # the faster you go the more ait friction, it gradually removes 2)% velocity until it equalizes
             # simple equation, a = 0 ; 5 * 1000 / 2000 = 2.5
@@ -85,7 +85,18 @@ def sim_run(options, PidController):
             # a = 2.5 - 0.2V = 0 ; 2.5/0.2 = 12.5 m/s
             # Eventually with friction an object will stop accelarating when max power is equal to friction
             
-            a -= 0.2 * v
+            # method of reducing acceleration based of velocity
+            # a -= 0.2 * v
+            
+            # basically a proportional rate of decel from friction
+            # apply the speed change to the total mass instead of reducing acceleration
+            friction_force = -0.2 * v * TOTAL_MASS
+            
+        net_force = motor_force + gravity_force + friction_force  
+        raw_accel = net_force / TOTAL_MASS  
+            
+        # soft limits for acceleration
+        a = MAX_ACCEL * np.tanh(raw_accel / MAX_ACCEL)
         
         return v, a, output, raw_output, p_out, i_out, d_out
     

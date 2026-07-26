@@ -17,21 +17,22 @@ options['COUNTERWEIGHT_MASS'] = 1000
 options['PEOPLE_MASS'] = 200
 # Controller Options
 options['CONTROLLER'] = True
-options['START_LOC'] = 1
-options['SET_POINT'] = 27
+options['START_LOC'] = 27
+options['SET_POINT'] = 3
 options['OUTPUT_GAIN'] = 2000
+options['MAX_ACCEL'] = 5
 
 class Controller:
     Kp = 5
-    Ki = 0.25
-    Kd = 6.7
+    Ki = 0.08
+    Kd = 8
     g = 9.8
     
     def __init__(self, starting_ref):
         self.r = starting_ref
         self.output = 0
         self.max_output = 5
-        self.max_windup = 5
+        self.max_windup = 2
         self.integral = 0
         
         self.weight_ratio = options["ELEVATOR_MASS"] - options["COUNTERWEIGHT_MASS"]
@@ -42,8 +43,8 @@ class Controller:
         # clip the gravity hold output to max output of the system
         # this is when all other PID outputs are zero and system needs to hold payload in place
         self.hold_ratio = np.clip(self.gravity_hold / self.max_output, -1, 1)
-        # # inverse tanh for ff, reduces math error for tanh saturation
-        self.g_feed_forward = self.max_output * np.arctanh(self.gravity_hold / self.max_output)
+        # # inverse tanh for ff, reduces math error for tanh saturationwhen arctanh processed holding output
+        self.g_feed_forward = self.max_output * np.arctanh(self.hold_ratio) # arctanh(0.196) = 0.19856, output = 0.19856 * 5 = 0.9928
 
         self.start_error = options['SET_POINT'] - options['START_LOC']
         
