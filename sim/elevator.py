@@ -10,7 +10,7 @@ from scipy.integrate import ode
 
 from mcap_writer import McapWriter
 
-dopri_counts = 0
+
 timestamp = time.time()
 file = f"{timestamp}.mcap"
 writer = McapWriter(path=file)
@@ -36,6 +36,11 @@ atexit.register(writer.close)
 # Controller is generic param but can name this like a class passed in
 def sim_run(options, PidController):
     start = time.perf_counter()
+    
+    # counters for total and individual dopri eval calls
+    dopri_counts = 0
+    elevator_counts = 0
+    
     # Simulator Options
     FIG_SIZE = options['FIG_SIZE'] # [Width, Height]
     PID_DEBUG = options['PID_DEBUG'] # this is not working for some reason
@@ -54,26 +59,41 @@ def sim_run(options, PidController):
     OUTPUT_GAIN = options['OUTPUT_GAIN']
     TOTAL_MASS = E_MASS + CW_MASS + P_MASS
     PAYLOAD_MASS = E_MASS + P_MASS - CW_MASS
+    g = -9.8
     
 
     pid = PidController(SET_POINT)
     
     def calc_dynamics(t, state, dt=None):
-        x,v = state 
+        x,v = state
+        
+        # solver will call this a bunch 
         output, raw_output, p_out, i_out, d_out = pid.run(t=t,x=x,v=v,dt=dt)
-        a = output*OUTPUT_GAIN / TOTAL_MASS
-        g = -9.8
+        # full equation
+        motor_output = output * OUTPUT_GAIN # max 5000 output
+        payload_accel = g * PAYLOAD_MASS # apply gravity to the payload mass, this is the force of gravity on the payload
+        a = (motor_output + payload_accel) / TOTAL_MASS # a = F/m, this is the acceleration of the elevator, counterweight, and payload
+        
+        # short hand because terms cancel
+        # a = output*OUTPUT_GAIN / TOTAL_MASS
         if GRAVITY:
             a += (g * PAYLOAD_MASS) / TOTAL_MASS
         if FRICTION:
+            # the faster you go the more ait friction, it gradually removes 2)% velocity until it equalizes
+            # simple equation, a = 0 ; 5 * 1000 / 2000 = 2.5
+            # so max power is 5, but its split between 2 masses, 
+            # a = 2.5 - 0.2V = 0 ; 2.5/0.2 = 12.5 m/s
+            # Eventually with friction an object will stop accelarating when max power is equal to friction
+            
             a -= 0.2 * v
         
         return v, a, output, raw_output, p_out, i_out, d_out
     
     # ODE Solver
     def elevator_physics(time_step, state):
-        global dopri_counts
+        nonlocal dopri_counts, elevator_counts
         dopri_counts += 1
+        elevator_counts += 1
         
         # velocity not needed here as integrate calls this a bunch of times for Rutta Bega thing
         # these are mostly the multiple dopri calls per time step, v,a
@@ -108,6 +128,12 @@ def sim_run(options, PidController):
         x = solver.y[0]
         v = solver.y[1]
         
+        # print and clear elevator counts 
+        # print("Dopri5 Run Count: ", dopri_counts, "Elevator Run Count: ", elevator_counts)
+        # getting exactly 8 calls per time step, total dopri calls increments by 8
+        elevator_counts = 0
+        # print("Current Time: ", round(t[k], 3), "seconds.")
+        
         # once it successfully integrates, capture dt and manually call calc_dynamics to update controller integral
         dt = t[k] - t[k-1]
         
@@ -139,10 +165,8 @@ def sim_run(options, PidController):
     print("Dopri5 Run Count: ", dopri_counts)
     state = solution
 
-
     ###################
     # SIMULATOR DISPLAY
-
 
     def update_plot(num):
         #print(state[num])
